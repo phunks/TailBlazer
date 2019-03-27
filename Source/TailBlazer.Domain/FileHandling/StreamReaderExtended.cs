@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security;
 using System.Text;
+using Multibyte.Text.Encoding;
 
 namespace TailBlazer.Domain.FileHandling
 {
@@ -81,6 +82,7 @@ namespace TailBlazer.Domain.FileHandling
 
         public StreamReaderExtended(Stream stream, bool detectEncodingFromByteOrderMarks)
             : this(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks, DefaultBufferSize)
+            //: this(stream, Encoding.GetEncoding(932), detectEncodingFromByteOrderMarks, DefaultBufferSize)
         {
         }
 
@@ -382,53 +384,51 @@ namespace TailBlazer.Domain.FileHandling
                 return;
             _detectEncoding = false;
             bool changedEncoding = false;
+                
+            if (MultibyteCharCode.DetectMultibyte(byteBuffer) != null)
+            {
+                encoding = MultibyteCharCode.DetectMultibyte(byteBuffer);
+                changedEncoding = true;
+            }
+            else
+            {
+                encoding = Encoding.GetEncoding(932);
+                CompressBuffer(2);
+            }
+
             if (byteBuffer[0] == 0xFE && byteBuffer[1] == 0xFF)
             {
                 // Big Endian Unicode 
-
-                encoding = new UnicodeEncoding(true, true);
                 CompressBuffer(2);
-                changedEncoding = true;
             }
-
             else if (byteBuffer[0] == 0xFF && byteBuffer[1] == 0xFE)
             {
                 // Little Endian Unicode, or possibly little endian UTF32 
                 if (byteLen < 4 || byteBuffer[2] != 0 || byteBuffer[3] != 0)
                 {
-                    encoding = new UnicodeEncoding(false, true);
                     CompressBuffer(2);
-                    changedEncoding = true;
                 }
-#if FEATURE_UTF32
-                else { 
-                    encoding = new UTF32Encoding(false, true);
-                    CompressBuffer(4); 
-                changedEncoding = true; 
+                else
+                {
+                    CompressBuffer(4);
+                }
             }
-#endif 
+            else if (byteLen >= 4 && byteBuffer[0] == 0 && byteBuffer[1] == 0 &&
+                    byteBuffer[2] == 0xFE && byteBuffer[3] == 0xFF)
+            {
+                // Big Endian UTF32
+                CompressBuffer(4);
             }
-
             else if (byteLen >= 3 && byteBuffer[0] == 0xEF && byteBuffer[1] == 0xBB && byteBuffer[2] == 0xBF)
             {
-                // UTF-8 
-                encoding = Encoding.UTF8;
+                // UTF-8
                 CompressBuffer(3);
-                changedEncoding = true;
             }
-#if FEATURE_UTF32 
-            else if (byteLen >= 4 && byteBuffer[0] == 0 && byteBuffer[1] == 0 &&
-                     byteBuffer[2] == 0xFE && byteBuffer[3] == 0xFF) {
-                // Big Endian UTF32
-                encoding = new UTF32Encoding(true, true); 
-                CompressBuffer(4);
-                changedEncoding = true; 
-            } 
-#endif
             else if (byteLen == 2)
+                // Note: in the future, if we change this algorithm significantly,
+                // we can support checking for the preamble of the given encoding.
                 _detectEncoding = true;
-            // Note: in the future, if we change this algorithm significantly,
-            // we can support checking for the preamble of the given encoding.
+
 
             if (changedEncoding)
             {
